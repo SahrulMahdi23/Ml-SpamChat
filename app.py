@@ -1,48 +1,57 @@
+# spam.py
+
 import streamlit as st
 import pandas as pd
-from sklearn.datasets import load_iris
-from sklearn.ensemble import RandomForestClassifier
+import os
+import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import accuracy_score
 
-st.title("🌸 Iris Flower Classification App")
-
-# Load and cache data
-@st.cache_data
-def load_data():
-    iris = load_iris()
-    X = pd.DataFrame(iris.data, columns=iris.feature_names)
-    y = pd.Series(iris.target)
-    return X, y, iris.target_names
-
-X, y, target_names = load_data()
-
-# Train and cache model
+# Load or train model
 @st.cache_resource
-def train_model(X, y):
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    return model
+def load_model():
+    if not os.path.exists("model.pkl") or not os.path.exists("vectorizer.pkl"):
+        # Load data
+        df = pd.read_csv("SMSSpamCollection", sep="\t", header=None, names=["label", "message"])
+        df['label_num'] = df.label.map({'ham':0, 'spam':1})
 
-model = train_model(X, y)
+        # Vectorize
+        vectorizer = CountVectorizer()
+        X = vectorizer.fit_transform(df['message'])
+        y = df['label_num']
 
-# Sidebar inputs
-st.sidebar.header("Input Features")
-sepal_length = st.sidebar.slider("Sepal length (cm)", float(X.iloc[:,0].min()), float(X.iloc[:,0].max()), float(X.iloc[:,0].mean()))
-sepal_width  = st.sidebar.slider("Sepal width (cm)",  float(X.iloc[:,1].min()), float(X.iloc[:,1].max()), float(X.iloc[:,1].mean()))
-petal_length = st.sidebar.slider("Petal length (cm)", float(X.iloc[:,2].min()), float(X.iloc[:,2].max()), float(X.iloc[:,2].mean()))
-petal_width  = st.sidebar.slider("Petal width (cm)",  float(X.iloc[:,3].min()), float(X.iloc[:,3].max()), float(X.iloc[:,3].mean()))
+        # Split and train
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        model = MultinomialNB()
+        model.fit(X_train, y_train)
 
-input_data = pd.DataFrame([[sepal_length, sepal_width, petal_length, petal_width]], columns=X.columns)
+        # Save model
+        joblib.dump(model, "model.pkl")
+        joblib.dump(vectorizer, "vectorizer.pkl")
+    else:
+        model = joblib.load("model.pkl")
+        vectorizer = joblib.load("vectorizer.pkl")
 
-# Predict
-if st.button("Predict"):
-    prediction = model.predict(input_data)[0]
-    proba = model.predict_proba(input_data)[0]
+    return model, vectorizer
 
-    st.subheader("Prediction Result")
-    st.success(f"🌼 Species: **{target_names[prediction]}**")
+# Load model
+model, vectorizer = load_model()
 
-    st.subheader("Prediction Probabilities")
-    st.bar_chart(pd.DataFrame(proba, index=target_names, columns=["Probability"]))
-else:
-    st.info("⬅️ Masukkan fitur dan klik Predict")
+# Streamlit UI
+st.title("Aplikasi Deteksi Pesan Spam")
+st.markdown("Masukkan pesan teks, lalu sistem akan memprediksi apakah pesan tersebut **Spam** atau **Bukan**.")
 
+input_text = st.text_area("Tulis pesan di sini:")
+
+if st.button("Deteksi"):
+    if input_text.strip() != "":
+        input_vector = vectorizer.transform([input_text])
+        prediction = model.predict(input_vector)[0]
+        if prediction == 1:
+            st.error("🚫 SPAM!")
+        else:
+            st.success("✅ Bukan Spam.")
+    else:
+        st.warning("Silakan masukkan teks terlebih dahulu.")
